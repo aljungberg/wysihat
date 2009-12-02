@@ -36,8 +36,6 @@ WysiHat.Editor = {
 
       if (initializer)
         initializer(editArea);
-
-      editArea.focus();
     });
   },
 

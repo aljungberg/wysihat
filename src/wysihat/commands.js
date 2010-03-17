@@ -1,3 +1,6 @@
+//= require "dom/selection"
+//= require "events/field_change"
+
 /** section: wysihat
  *  mixin WysiHat.Commands
  *
@@ -13,7 +16,7 @@
  *  In this example, it is important to stop the click event so you don't
  *  lose your current selection.
 **/
-WysiHat.Commands = (function() {
+var $E = WysiHat.Commands = (function(window) {
   /**
    *  WysiHat.Commands#boldSelection() -> undefined
    *
@@ -94,7 +97,7 @@ WysiHat.Commands = (function() {
   function fontSelection(font) {
     this.execCommand('fontname', false, font);
   }
-    
+
   /**
    * WysiHat.Commands#fontSizeSelection(fontSize) -> undefined
    * - font size (int) : font size for selection
@@ -118,7 +121,7 @@ WysiHat.Commands = (function() {
   /**
    *  WysiHat.Commands#backgroundColorSelection(color) -> undefined
    *  - color (string) - a color or hexadecimal value
-   *  
+   *
    * Sets the background color.  Firefox will fill in the background
    * color of the entire iframe unless hilitecolor is used.
   **/
@@ -129,11 +132,11 @@ WysiHat.Commands = (function() {
       this.execCommand('backcolor', false, color);
     }
   }
-  
+
   /**
    *  WysiHat.Commands#alignSelection(color) -> undefined
    *  - alignment (string) - how the text should be aligned (left, center, right)
-   *  
+   *
   **/
   function alignSelection(alignment) {
     this.execCommand('justify' + alignment);
@@ -145,7 +148,7 @@ WysiHat.Commands = (function() {
    *  Returns the alignment of the selected text area
   **/
   function alignSelected() {
-    var node = this.selection.getNode();
+    var node = window.getSelection().getNode();
     return Element.getStyle(node, 'textAlign');
   }
 
@@ -165,9 +168,9 @@ WysiHat.Commands = (function() {
    *  Selects the entire link at the cursor and removes it
   **/
   function unlinkSelection() {
-    var node = this.selection.getNode();
+    var node = window.getSelection().getNode();
     if (this.linkSelected())
-      this.selection.selectNode(node);
+      window.getSelection().selectNode(node);
 
     this.execCommand('unlink', false, null);
   }
@@ -178,28 +181,79 @@ WysiHat.Commands = (function() {
    *  Check if current selection is link.
   **/
   function linkSelected() {
-    var node = this.selection.getNode();
+    var node = window.getSelection().getNode();
     return node ? node.tagName.toUpperCase() == 'A' : false;
+  }
+
+  /**
+   *  WysiHat.Commands#formatblockSelection(element) -> undefined
+   *  - element (String): the type of element you want to wrap your selection
+   *    with (like 'h1' or 'p').
+   *
+   *  Wraps the current selection in a header or paragraph.
+  **/
+  function formatblockSelection(element){
+    this.execCommand('formatblock', false, element);
+  }
+
+  /**
+   *  WysiHat.Commands#toggleOrderedList() -> undefined
+   *
+   *  Formats current selection as an ordered list. If the selection is empty
+   *  a new list is inserted.
+  **/
+  function toggleOrderedList() {
+    this.execCommand('insertorderedlist', false, null);
   }
 
   /**
    *  WysiHat.Commands#insertOrderedList() -> undefined
    *
-   *  Formats current selection as an ordered list. If the selection is empty
-   *  a new list is inserted.
+   *  Alias for WysiHat.Commands#toggleOrderedList
   **/
   function insertOrderedList() {
-    this.execCommand('insertorderedlist', false, null);
+    this.toggleOrderedList();
+  }
+
+  /**
+   *  WysiHat.Commands#orderedListSelected() -> boolean
+   *
+   *  Check if current selection is within an ordered list.
+  **/
+  function orderedListSelected() {
+    var element = window.getSelection().getNode();
+    if (element) return element.match("[contenteditable=true] ol, [contenteditable=true] ol *");
+    return false;
+  }
+
+  /**
+   *  WysiHat.Commands#toggleUnorderedList() -> undefined
+   *
+   *  Formats current selection as an unordered list. If the selection is empty
+   *  a new list is inserted.
+  **/
+  function toggleUnorderedList() {
+    this.execCommand('insertunorderedlist', false, null);
   }
 
   /**
    *  WysiHat.Commands#insertUnorderedList() -> undefined
    *
-   *  Formats current selection as an unordered list. If the selection is empty
-   *  a new list is inserted.
+   *  Alias for WysiHat.Commands#toggleUnorderedList()
   **/
   function insertUnorderedList() {
-    this.execCommand('insertunorderedlist', false, null);
+    this.toggleUnorderedList();
+  }
+
+  /**
+   *  WysiHat.Commands#unorderedListSelected() -> boolean
+   *
+   *  Check if current selection is within an unordered list.
+  **/
+  function unorderedListSelected() {
+    var element = window.getSelection().getNode();
+    if (element) return element.match("[contenteditable=true] ul, [contenteditable=true] ul *");
+    return false;
   }
 
   /**
@@ -220,7 +274,7 @@ WysiHat.Commands = (function() {
   **/
   function insertHTML(html) {
     if (Prototype.Browser.IE) {
-      var range = this._selection.getRange();
+      var range = window.document.selection.createRange();
       range.pasteHTML(html);
       range.collapse(false);
       range.select();
@@ -239,15 +293,16 @@ WysiHat.Commands = (function() {
    *  A simple delegation method to the documents execCommand method.
   **/
   function execCommand(command, ui, value) {
-    var document = this.getDocument();
-
-    if (Prototype.Browser.IE) this.selection.restore();
-
     var handler = this.commands.get(command);
-    if (handler)
+    if (handler) {
       handler.bind(this)(value);
-    else
-      document.execCommand(command, ui, value);
+    } else {
+      try {
+        window.document.execCommand(command, ui, value);
+      } catch(e) { return null; }
+    }
+
+    document.activeElement.fire("field:change");
   }
 
   /**
@@ -263,71 +318,77 @@ WysiHat.Commands = (function() {
    *  editor.queryCommands.set("link", editor.linkSelected);
   **/
   function queryCommandState(state) {
-    var document = this.getDocument();
-
     var handler = this.queryCommands.get(state);
-    if (handler)
+    if (handler) {
       return handler.bind(this)();
-    else
-      return document.queryCommandState(state);
-  }     
+    } else {
+      try {
+        return window.document.queryCommandState(state);
+      } catch(e) { return null; }
+    }
+  }
 
   /**
    *  WysiHat.Commands#getSelectedStyles() -> Hash
-   * 
-   *  Fetches the styles (from the styleSelectors hash) from the current 
+   *
+   *  Fetches the styles (from the styleSelectors hash) from the current
    *  selection and returns it as a hash
   **/
-	function getSelectedStyles() {
-	  var styles = $H({});
-	  var editor = this;
-	  editor.styleSelectors.each(function(style){
-	    var node = editor.selection.getNode();
+  function getSelectedStyles() {
+    var styles = $H({});
+    var editor = this;
+    editor.styleSelectors.each(function(style){
+      var node = editor.selection.getNode();
       styles.set(style.first(), Element.getStyle(node, style.last()));
-	  });
-	  return styles;
-	}
-	
+    });
+    return styles;
+  }
+
   return {
-     boldSelection:                    boldSelection,
-     boldSelected:                     boldSelected,
-     underlineSelection:               underlineSelection,
-     underlineSelected:                underlineSelected,
-     italicSelection:                  italicSelection,
-     italicSelected:                   italicSelected,
-     strikethroughSelection:           strikethroughSelection,
-     blockquoteSelection:              blockquoteSelection,
-     fontSelection:                    fontSelection,
-     fontSizeSelection:                fontSizeSelection,
-     colorSelection:                   colorSelection,
-     backgroundColorSelection:         backgroundColorSelection,
-     alignSelection:                   alignSelection,
-     alignSelected:                    alignSelected,
-     linkSelection:                    linkSelection,
-     unlinkSelection:                  unlinkSelection,
-     linkSelected:                     linkSelected,
-     insertOrderedList:                insertOrderedList,
-     insertUnorderedList:              insertUnorderedList,
-     insertImage:                      insertImage,
-     insertHTML:                       insertHTML,
-     execCommand:                      execCommand,
-     queryCommandState:                queryCommandState,
-     getSelectedStyles:                getSelectedStyles,
-     
+     boldSelection:            boldSelection,
+     boldSelected:             boldSelected,
+     underlineSelection:       underlineSelection,
+     underlineSelected:        underlineSelected,
+     italicSelection:          italicSelection,
+     italicSelected:           italicSelected,
+     strikethroughSelection:   strikethroughSelection,
+     blockquoteSelection:      blockquoteSelection,
+     fontSelection:            fontSelection,
+     fontSizeSelection:        fontSizeSelection,
+     colorSelection:           colorSelection,
+     backgroundColorSelection: backgroundColorSelection,
+     alignSelection:           alignSelection,
+     alignSelected:            alignSelected,
+     linkSelection:            linkSelection,
+     unlinkSelection:          unlinkSelection,
+     linkSelected:             linkSelected,
+     formatblockSelection:     formatblockSelection,
+     toggleOrderedList:        toggleOrderedList,
+     insertOrderedList:        insertOrderedList,
+     orderedListSelected:      orderedListSelected,
+     toggleUnorderedList:      toggleUnorderedList,
+     insertUnorderedList:      insertUnorderedList,
+     unorderedListSelected:    unorderedListSelected,
+     insertImage:              insertImage,
+     insertHTML:               insertHTML,
+     execCommand:              execCommand,
+     queryCommandState:        queryCommandState,
+     getSelectedStyles:        getSelectedStyles,
+
     commands: $H({}),
 
     queryCommands: $H({
-      link: linkSelected
+      link:          linkSelected,
+      orderedlist:   orderedListSelected,
+      unorderedlist: unorderedListSelected
     }),
-    
+
     styleSelectors: $H({
-      fontname:     'fontFamily',
-      fontsize:     'fontSize',
-      forecolor:    'color',
-      hilitecolor:  'backgroundColor',
-      backcolor:    'backgroundColor'
+      fontname:    'fontFamily',
+      fontsize:    'fontSize',
+      forecolor:   'color',
+      hilitecolor: 'backgroundColor',
+      backcolor:   'backgroundColor'
     })
   };
-})();
-
-WysiHat.Editor.include(WysiHat.Commands);
+})(window);
